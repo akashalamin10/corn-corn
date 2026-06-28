@@ -35,7 +35,7 @@ def load_css():
 load_css()
 
 # ── Load Models ───────────────────────────────────────────────────────────────
-@st.cache_resource(show_spinner="🌽 Initializing MAIZE-XNet ensemble models...")
+@st.cache_resource(show_spinner="Initializing MAIZE-XNet ensemble models...First time load only (30 seconds)")
 def get_models():
     try:
         return load_all_models()
