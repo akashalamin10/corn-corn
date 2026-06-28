@@ -754,19 +754,19 @@ if not uploaded_file:
       <div class="contact-row">
         <div class="contact-item">
           <span class="contact-label">Developer</span>
-          <span class="contact-val">Your Name — MSc Thesis, CSE Department</span>
+          <span class="contact-val">FAZLE RABBI — BSc Thesis, SWE Department</span>
         </div>
         <div class="contact-item">
           <span class="contact-label">Email</span>
-          <span class="contact-val">your@email.com</span>
+          <span class="contact-val">EMAIL@email.com</span>
         </div>
         <div class="contact-item">
           <span class="contact-label">Institution</span>
-          <span class="contact-val">Your University</span>
+          <span class="contact-val">DIU</span>
         </div>
         <div class="contact-item">
           <span class="contact-label">Model Repo</span>
-          <span class="contact-val">huggingface.co/your-username/maize-xnet</span>
+          <span class="contact-val">huggingface.co/AKASH4529/maize-xnet</span>
         </div>
       </div>
     </div>
@@ -782,8 +782,8 @@ md("""
       <span class="footer-logo-maize">MAIZE</span><span class="footer-logo-x">-X</span><span class="footer-logo-net">Net</span>
     </div>
     <div class="footer-meta">
-      MSc Thesis &nbsp;&middot;&nbsp; Your University
-      &nbsp;&middot;&nbsp; Department of CSE &nbsp;&middot;&nbsp;
+      BSc Thesis &nbsp;&middot;&nbsp; DIU
+      &nbsp;&middot;&nbsp; Department of SWE &nbsp;&middot;&nbsp;
       Deep Learning &middot; Computer Vision &middot; XAI &middot; Corn Disease Classification
     </div>
     <div class="footer-note">
