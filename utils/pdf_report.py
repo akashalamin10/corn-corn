@@ -3,6 +3,10 @@ MAIZE-XNet PDF Diagnostic Report Generator
 Builds a professional multi-section PDF using reportlab.
 Includes: diagnosis summary, Grad-CAM heatmaps, TSDS, gate weights,
 class probabilities, treatment recommendations, and system info.
+
+THEME: Clean white-background report. All text uses dark green/charcoal
+tones for contrast against white/light-gray panels — no leftover dark
+panels from the original dark-mode design remain.
 """
 
 import io
@@ -31,27 +35,28 @@ def build_pdf(image, pred_class, final_probs, individual_probs,
     except ImportError:
         raise ImportError("reportlab is required: pip install reportlab")
 
-    # ── Colors — WHITE BACKGROUND PDF ────────────────────────────────────────
-    GREEN_DARK   = HexColor("#005c2a")
-    GREEN_MID    = HexColor("#00843f")
-    GREEN_LIGHT  = HexColor("#00a84f")
-    GREEN_BG     = HexColor("#ffffff")   # ← was dark, now white
+    # ── Colors — WHITE BACKGROUND PDF, dark text throughout ─────────────────
+    GREEN_DARK   = HexColor("#005c2a")   # used only for header banner bg
+    GREEN_MID    = HexColor("#00843f")   # accent lines, bars
+    GREEN_LIGHT  = HexColor("#00a84f")   # H2 headings (readable on white)
+    GREEN_BG     = HexColor("#ffffff")   # main panel background = white
+    ROW_ALT_BG   = HexColor("#f2f8f4")   # light green-gray for alt rows (NOT dark)
+    HEADER_BG    = GREEN_DARK            # table header row background
     CORN_YELLOW  = HexColor("#aa8800")
     CYAN         = HexColor("#007a8a")
     RED          = HexColor("#cc1133")
     AMBER        = HexColor("#cc7700")
     MAG          = HexColor("#880099")
-    GRAY_DARK    = HexColor("#0a1f10")
-    GRAY_MID     = HexColor("#3a6b4a")
-    GRAY_LIGHT   = HexColor("#1a3a22")
-    GRAY_BG      = HexColor("#ffffff")   # ← was dark, now white
+
+    TEXT_DARK    = HexColor("#10231a")   # primary body text — near-black green, dark enough for white bg
+    TEXT_MID     = HexColor("#3a6b4a")   # secondary/dim text — still readable on white
     BORDER       = HexColor("#b8ddc4")
     WHITE        = white
     WHITE_HEX    = HexColor("#ffffff")
 
     SEV_COLORS = {
         "None":   HexColor("#00843f"),
-        "Medium": HexColor("#cc7700"),
+        "Medium": HexColor("#b35c00"),
         "High":   HexColor("#cc1133"),
     }
     MODEL_COLORS_HEX = ["#007a8a", "#00843f", "#cc1133", "#880099"]
@@ -62,18 +67,22 @@ def build_pdf(image, pred_class, final_probs, individual_probs,
     confidence = float(final_probs[pred_idx])
     now        = datetime.datetime.now()
 
-    # TSDS label
+    # TSDS label — colors kept vivid but readable; backgrounds for these
+    # boxes are light tints, not dark panels (set further down).
     if tsds_score >= 0.50:
         tsds_text  = "High Stability"
-        tsds_color = HexColor("#39ff88")
+        tsds_color = HexColor("#00843f")
+        tsds_box_bg = HexColor("#eafaf0")
         tsds_desc  = "High saliency stability — consistent attention region across all augmented passes."
     elif tsds_score >= 0.30:
         tsds_text  = "Moderate Stability"
-        tsds_color = HexColor("#ffb627")
+        tsds_color = HexColor("#b35c00")
+        tsds_box_bg = HexColor("#fff6ea")
         tsds_desc  = "Partial spatial consistency — moderate prediction trust."
     else:
         tsds_text  = "Low Stability"
-        tsds_color = HexColor("#ff3b5c")
+        tsds_color = HexColor("#cc1133")
+        tsds_box_bg = HexColor("#fdeeee")
         tsds_desc  = "Significant saliency drift detected — expert verification recommended."
 
     # ── Document ──────────────────────────────────────────────────────────────
@@ -96,16 +105,22 @@ def build_pdf(image, pred_class, final_probs, individual_probs,
     def S(name, **kw):
         return ParagraphStyle(name, **kw)
 
+    # Header banner text stays WHITE because its background (GREEN_DARK) is dark.
     H1   = S("H1",   fontName="Helvetica-Bold",   fontSize=20, textColor=WHITE_HEX,  leading=24, spaceAfter=2)
-    H1s  = S("H1s",  fontName="Helvetica-Bold",   fontSize=13, textColor=GRAY_LIGHT, leading=16, spaceAfter=2)
-    H2   = S("H2",   fontName="Helvetica-Bold",   fontSize=13, textColor=GREEN_LIGHT,leading=17, spaceAfter=4)
-    H3   = S("H3",   fontName="Helvetica-Bold",   fontSize=10, textColor=CYAN,       leading=13, spaceAfter=3)
-    BODY = S("BODY", fontName="Helvetica",         fontSize=9,  textColor=GRAY_LIGHT, leading=14, spaceAfter=2)
-    BDIM = S("BDIM", fontName="Helvetica",         fontSize=9,  textColor=GRAY_MID,  leading=13)
-    SMAL = S("SMAL", fontName="Helvetica",         fontSize=8,  textColor=GRAY_MID,  leading=11)
-    LBL  = S("LBL",  fontName="Helvetica-Bold",    fontSize=8,  textColor=GRAY_MID,  leading=10)
-    CTR  = S("CTR",  fontName="Helvetica",         fontSize=9,  textColor=GRAY_LIGHT,leading=12, alignment=TA_CENTER)
-    CORN = S("CORN", fontName="Helvetica-Bold",    fontSize=18, textColor=CORN_YELLOW,leading=22)
+    H1s  = S("H1s",  fontName="Helvetica-Bold",   fontSize=13, textColor=WHITE_HEX,  leading=16, spaceAfter=2)
+
+    # Everything below sits on white/light backgrounds → dark text.
+    H2   = S("H2",   fontName="Helvetica-Bold",   fontSize=13, textColor=GREEN_LIGHT, leading=17, spaceAfter=4)
+    H3   = S("H3",   fontName="Helvetica-Bold",   fontSize=10, textColor=CYAN,        leading=13, spaceAfter=3)
+    BODY = S("BODY", fontName="Helvetica",         fontSize=9,  textColor=TEXT_DARK,  leading=14, spaceAfter=2)
+    BDIM = S("BDIM", fontName="Helvetica",         fontSize=9,  textColor=TEXT_MID,   leading=13)
+    SMAL = S("SMAL", fontName="Helvetica",         fontSize=8,  textColor=TEXT_MID,   leading=11)
+    LBL  = S("LBL",  fontName="Helvetica-Bold",    fontSize=8,  textColor=TEXT_MID,   leading=10)
+    CTR  = S("CTR",  fontName="Helvetica",         fontSize=9,  textColor=TEXT_DARK,  leading=12, alignment=TA_CENTER)
+    CORN = S("CORN", fontName="Helvetica-Bold",    fontSize=18, textColor=CORN_YELLOW, leading=22)
+
+    # Table header rows have a dark green background → their text must stay white.
+    LBL_ON_DARK = S("LBL_ON_DARK", fontName="Helvetica-Bold", fontSize=8, textColor=WHITE_HEX, leading=10)
 
     # ── Custom Flowables ──────────────────────────────────────────────────────
     class ColorBar(Flowable):
@@ -151,7 +166,7 @@ def build_pdf(image, pred_class, final_probs, individual_probs,
     # ── Story ─────────────────────────────────────────────────────────────────
     story = []
 
-    # ── PAGE 1: HEADER BANNER ─────────────────────────────────────────────────
+    # ── PAGE 1: HEADER BANNER (dark green bg, white text — intentional) ──────
     header_data = [[
         Paragraph("🌽  MAIZE-XNet", H1),
         Paragraph("Corn Disease Diagnostic Report", H1s),
@@ -170,7 +185,7 @@ def build_pdf(image, pred_class, final_probs, individual_probs,
     story.append(hdr_t)
     story.append(Spacer(1, 3 * mm))
 
-    # Metadata row
+    # Metadata row — white background, dark text
     meta_data = [[
         Paragraph(f"<b>Date:</b> {now.strftime('%B %d, %Y')}", BODY),
         Paragraph(f"<b>Time:</b> {now.strftime('%H:%M:%S')}", BODY),
@@ -192,7 +207,7 @@ def build_pdf(image, pred_class, final_probs, individual_probs,
     story.append(Paragraph("1. Diagnosis Summary", H2))
     story.append(HRFlowable(width=usable_w, thickness=1.5, color=GREEN_MID, spaceAfter=4))
 
-    sev_color = SEV_COLORS.get(info["severity"], GRAY_MID)
+    sev_color = SEV_COLORS.get(info["severity"], TEXT_MID)
 
     diag_left = [
         [Paragraph("DETECTED DISEASE", LBL)],
@@ -239,6 +254,7 @@ def build_pdf(image, pred_class, final_probs, individual_probs,
     story.append(Paragraph("2. Clinical Recommendations", H2))
     story.append(HRFlowable(width=usable_w, thickness=1.5, color=GREEN_MID, spaceAfter=4))
 
+    # FIX: both panels now use light backgrounds (not black) with dark text.
     rec_data = [
         [Paragraph("⚕  Recommended Treatment", H3),
          Paragraph("🛡  Prevention Measures", H3)],
@@ -247,8 +263,8 @@ def build_pdf(image, pred_class, final_probs, individual_probs,
     ]
     rec_t = Table(rec_data, colWidths=[usable_w / 2 - 4, usable_w / 2 - 4])
     rec_t.setStyle(TableStyle([
-        ("BACKGROUND",    (0, 0), (0, -1), HexColor("#100a0a")),
-        ("BACKGROUND",    (1, 0), (1, -1), GREEN_BG),
+        ("BACKGROUND",    (0, 0), (0, -1), HexColor("#fdf2f2")),   # very light red tint
+        ("BACKGROUND",    (1, 0), (1, -1), HexColor("#eefaf2")),   # very light green tint
         ("BOX",           (0, 0), (0, -1), 0.5, RED),
         ("BOX",           (1, 0), (1, -1), 0.5, GREEN_MID),
         ("TOPPADDING",    (0, 0), (-1, -1), 10),
@@ -265,9 +281,9 @@ def build_pdf(image, pred_class, final_probs, individual_probs,
     story.append(HRFlowable(width=usable_w, thickness=1.5, color=GREEN_MID, spaceAfter=4))
 
     model_rows = [[
-        Paragraph("Model", LBL), Paragraph("Prediction", LBL),
-        Paragraph("Confidence", LBL), Paragraph("Gate Weight", LBL),
-        Paragraph("Agreement", LBL),
+        Paragraph("Model", LBL_ON_DARK), Paragraph("Prediction", LBL_ON_DARK),
+        Paragraph("Confidence", LBL_ON_DARK), Paragraph("Gate Weight", LBL_ON_DARK),
+        Paragraph("Agreement", LBL_ON_DARK),
     ]]
     for i, (mname, mhex, mcolor) in enumerate(
             zip(model_names, MODEL_COLORS_HEX, MODEL_COLORS)):
@@ -282,7 +298,7 @@ def build_pdf(image, pred_class, final_probs, individual_probs,
             Paragraph(f"{m_conf*100:.1f}%", BODY),
             Paragraph(f"{m_weight*100:.1f}%", BODY),
             Paragraph(
-                f'<font color="{"#39ff88" if agrees else "#ff3b5c"}"><b>'
+                f'<font color="{"#00843f" if agrees else "#cc1133"}"><b>'
                 f'{"✓ Agrees" if agrees else "✗ Differs"}</b></font>', BODY),
         ])
 
@@ -290,11 +306,10 @@ def build_pdf(image, pred_class, final_probs, individual_probs,
     mod_t = Table(model_rows, colWidths=col_w)
     mod_t.setStyle(TableStyle([
         ("BACKGROUND",    (0, 0), (-1, 0), GREEN_DARK),
-        ("TEXTCOLOR",     (0, 0), (-1, 0), GRAY_LIGHT),
         ("TOPPADDING",    (0, 0), (-1, -1), 7),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
         ("LEFTPADDING",   (0, 0), (-1, -1), 9),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [GREEN_BG, HexColor("#0c1a0e")]),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [GREEN_BG, ROW_ALT_BG]),   # FIX: light alt rows, not dark
         ("GRID",          (0, 0), (-1, -1), 0.3, BORDER),
     ]))
     story.append(mod_t)
@@ -306,15 +321,15 @@ def build_pdf(image, pred_class, final_probs, individual_probs,
 
     sorted_idx = np.argsort(final_probs)[::-1]
     prob_rows  = [[
-        Paragraph("Rank", LBL), Paragraph("Disease Class", LBL),
-        Paragraph("Severity", LBL), Paragraph("Probability", LBL),
-        Paragraph("Confidence Bar", LBL),
+        Paragraph("Rank", LBL_ON_DARK), Paragraph("Disease Class", LBL_ON_DARK),
+        Paragraph("Severity", LBL_ON_DARK), Paragraph("Probability", LBL_ON_DARK),
+        Paragraph("Confidence Bar", LBL_ON_DARK),
     ]]
     for rank, idx in enumerate(sorted_idx, 1):
         cn     = class_names[idx]
         ci     = class_info[cn]
         prob   = float(final_probs[idx])
-        sc     = SEV_COLORS.get(ci["severity"], GRAY_MID)
+        sc     = SEV_COLORS.get(ci["severity"], TEXT_MID)
         is_top = rank == 1
         prob_rows.append([
             Paragraph(f"<b>#{rank}</b>" if is_top else f"#{rank}", BODY),
@@ -322,7 +337,7 @@ def build_pdf(image, pred_class, final_probs, individual_probs,
                       if is_top else ci["display"], BODY),
             Paragraph(ci["severity"], BODY),
             Paragraph(f"<b>{prob*100:.1f}%</b>" if is_top else f"{prob*100:.1f}%", BODY),
-            ColorBar(prob, color=sc if is_top else GRAY_MID,
+            ColorBar(prob, color=sc if is_top else TEXT_MID,
                      width=usable_w * 0.22, height=8),
         ])
 
@@ -330,12 +345,10 @@ def build_pdf(image, pred_class, final_probs, individual_probs,
     prob_t = Table(prob_rows, colWidths=prob_col_w)
     prob_t.setStyle(TableStyle([
         ("BACKGROUND",    (0, 0), (-1, 0), GREEN_DARK),
-        ("TEXTCOLOR",     (0, 0), (-1, 0), GRAY_LIGHT),
-        ("BACKGROUND",    (0, 1), (-1, 1), HexColor("#0d1f10")),
         ("TOPPADDING",    (0, 0), (-1, -1), 7),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
         ("LEFTPADDING",   (0, 0), (-1, -1), 8),
-        ("ROWBACKGROUNDS", (0, 2), (-1, -1), [GREEN_BG, HexColor("#0c1a0e")]),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [GREEN_BG, ROW_ALT_BG]),   # FIX: light alt rows
         ("GRID",          (0, 0), (-1, -1), 0.3, BORDER),
         ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
     ]))
@@ -375,6 +388,7 @@ def build_pdf(image, pred_class, final_probs, individual_probs,
     story.append(Paragraph("6. TSDS — Temporal Saliency Drift Score (XAI Trust Certificate)", H2))
     story.append(HRFlowable(width=usable_w, thickness=1.5, color=GREEN_MID, spaceAfter=4))
 
+    # FIX: tsds_box_bg is now a light tint (chosen above based on score), not black/dark green.
     tsds_box = Table([[Paragraph(
         f"TSDS = <b>{tsds_score:.4f}</b>  &nbsp;·&nbsp;  {tsds_text}<br/>"
         f"<font size='8'>{tsds_desc}<br/><br/>"
@@ -386,8 +400,7 @@ def build_pdf(image, pred_class, final_probs, individual_probs,
         f"Score range: 0.0 (complete spatial disagreement) → 1.0 (perfect consensus).</font>",
         BODY)]])
     tsds_box.setStyle(TableStyle([
-        ("BACKGROUND",    (0, 0), (-1, -1),
-         HexColor("#0a1f0a") if tsds_score >= 0.30 else HexColor("#1a0a0a")),
+        ("BACKGROUND",    (0, 0), (-1, -1), tsds_box_bg),
         ("BOX",           (0, 0), (-1, -1), 1.5, tsds_color),
         ("TOPPADDING",    (0, 0), (-1, -1), 12),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
@@ -469,15 +482,14 @@ def build_pdf(image, pred_class, final_probs, individual_probs,
     ]
     sys_col_w = [usable_w * 0.28, usable_w * 0.72]
     sys_t = Table(
-        [[Paragraph(r[0], LBL if i == 0 else BDIM),
-          Paragraph(r[1], LBL if i == 0 else BODY)]
+        [[Paragraph(r[0], LBL_ON_DARK if i == 0 else BDIM),
+          Paragraph(r[1], LBL_ON_DARK if i == 0 else BODY)]
          for i, r in enumerate(sys_data)],
         colWidths=sys_col_w
     )
     sys_t.setStyle(TableStyle([
         ("BACKGROUND",    (0, 0), (-1, 0), GREEN_DARK),
-        ("TEXTCOLOR",     (0, 0), (-1, 0), GRAY_LIGHT),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [GREEN_BG, HexColor("#0c1a0e")]),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [GREEN_BG, ROW_ALT_BG]),   # FIX: light alt rows
         ("GRID",          (0, 0), (-1, -1), 0.3, BORDER),
         ("TOPPADDING",    (0, 0), (-1, -1), 6),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
@@ -487,15 +499,16 @@ def build_pdf(image, pred_class, final_probs, individual_probs,
     story.append(Spacer(1, 6 * mm))
 
     # ── DISCLAIMER ────────────────────────────────────────────────────────────
+    # FIX: light amber tint background instead of near-black, dark text instead of dim gray.
     disc = Table([[Paragraph(
         "⚠️  RESEARCH DISCLAIMER: This report is generated by an AI research system "
         "developed as part of an MSc thesis (MAIZE-XNet). It is intended for academic "
         "and research purposes only. Always consult a qualified agronomist or certified "
         "plant pathologist for definitive field diagnosis and treatment decisions. "
         "The authors accept no liability for decisions made solely based on this report.",
-        SMAL)]])
+        S("disc", fontName="Helvetica", fontSize=8, textColor=TEXT_DARK, leading=11))]])
     disc.setStyle(TableStyle([
-        ("BACKGROUND",    (0, 0), (-1, -1), HexColor("#100d00")),
+        ("BACKGROUND",    (0, 0), (-1, -1), HexColor("#fff8e8")),
         ("BOX",           (0, 0), (-1, -1), 0.5, AMBER),
         ("TOPPADDING",    (0, 0), (-1, -1), 10),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
@@ -508,7 +521,7 @@ def build_pdf(image, pred_class, final_probs, individual_probs,
     def add_page_number(canvas_obj, doc_obj):
         canvas_obj.saveState()
         canvas_obj.setFont("Helvetica", 7)
-        canvas_obj.setFillColor(GRAY_MID)
+        canvas_obj.setFillColor(TEXT_MID)
         pg = canvas_obj.getPageNumber()
         canvas_obj.drawCentredString(
             W / 2, 7 * mm,
