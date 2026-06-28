@@ -7,9 +7,28 @@ Setup:
   1. Upload your .onnx files to Hugging Face Hub
   2. Set HF_REPO_ID below to your repo (e.g. "your-username/maize-xnet")
   3. The app will auto-download models on first run and cache them
+
+MEMORY NOTES (Streamlit Community Cloud free tier ~1GB RAM):
+  - OMP/MKL thread env vars are set BEFORE torch is imported anywhere,
+    since each thread torch spawns reserves its own memory arena.
+  - Grad-CAM rebuilds PyTorch models from .pth checkpoints (separate from
+    the ONNX files used for prediction) ONE AT A TIME, and explicitly frees
+    every intermediate tensor + calls gc.collect() after each model so peak
+    memory stays bounded to "ONNX sessions + 1 PyTorch model" rather than
+    "ONNX sessions + 4 PyTorch models" all resident at once.
 """
 
 import os
+
+# MUST be set before torch is imported anywhere in this process.
+# Each OMP/MKL thread torch spawns reserves its own memory arena;
+# on a 1GB instance this alone can be the difference between OOM and not.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+
+import gc
 import io
 import numpy as np
 from PIL import Image
@@ -86,10 +105,17 @@ def load_all_models():
         return None
 
     try:
+        # Cap ONNX Runtime's own internal thread pools too — by default it
+        # spins up threads proportional to CPU count, which adds up fast
+        # when 5 sessions are loaded simultaneously.
+        sess_options = ort.SessionOptions()
+        sess_options.intra_op_num_threads = 1
+        sess_options.inter_op_num_threads = 1
+
         providers = ["CPUExecutionProvider"]
         sessions = {}
         for key, path in paths.items():
-            sess = ort.InferenceSession(path, providers=providers)
+            sess = ort.InferenceSession(path, sess_options=sess_options, providers=providers)
             sessions[key] = sess
         print("[MAIZE-XNet] All 5 ONNX models loaded successfully.")
         return sessions
@@ -140,7 +166,7 @@ def run_inference(pil_img, sessions):
     gate_weights = _softmax(gate_weights)
 
     # Weighted ensemble
-    # FIX: individual_probs are already valid probability distributions (each row sums to 1).
+    # individual_probs are already valid probability distributions (each row sums to 1).
     # gate_weights also sum to 1 (softmax output from attention gate).
     # Therefore their weighted sum is already a valid probability distribution — DO NOT
     # apply softmax() again. Re-applying softmax compresses the distribution toward
@@ -167,6 +193,10 @@ def compute_gradcam(pil_img, sessions, pred_class_idx):
     Compute Grad-CAM attention maps for all 4 backbone models using
     PyTorch hooks (models reconstructed in eval mode from timm).
 
+    Models are processed strictly ONE AT A TIME and fully released
+    (del + gc.collect()) before the next is loaded, to keep peak memory
+    bounded on memory-constrained hosts.
+
     Returns list of 4 numpy arrays (224×224, normalized 0-1), or None on failure.
     """
     try:
@@ -174,6 +204,14 @@ def compute_gradcam(pil_img, sessions, pred_class_idx):
         import torch.nn as nn
         import timm
         from huggingface_hub import hf_hub_download
+
+        # Belt-and-suspenders: also cap thread count inside this process,
+        # in case torch was imported elsewhere first.
+        torch.set_num_threads(1)
+        try:
+            torch.set_num_interop_threads(1)
+        except RuntimeError:
+            pass  # can only be set once per process; ignore if already set
 
         DEVICE = torch.device("cpu")
 
@@ -217,83 +255,103 @@ def compute_gradcam(pil_img, sessions, pred_class_idx):
         cam_maps = []
 
         for key in ["efficientnet_b4", "convnext_tiny", "maxvit_small", "mobilevit_small"]:
-            # Download PyTorch checkpoint
-            pt_path = hf_hub_download(repo_id=HF_REPO_ID, filename=pt_files[key])
-            model   = MAIZEXNetModel(timm_names[key]).to(DEVICE)
-            model.load_state_dict(torch.load(pt_path, map_location=DEVICE))
-            model.eval()
-
-            # Prepare input
-            sz  = pt_img_sizes[key]
-            tf  = get_transform(sz)
-            inp = tf(pil_img).unsqueeze(0).to(DEVICE)
-
-            # Hook-based Grad-CAM
+            model = None
+            inp = None
+            out = None
+            score = None
+            handle = None
             gradients, activations = [], []
 
-            def save_grad(g):   gradients.append(g)
-            def save_act(m, i, o):
-                activations.append(o)
-                o.register_hook(save_grad)
+            try:
+                # Download PyTorch checkpoint
+                pt_path = hf_hub_download(repo_id=HF_REPO_ID, filename=pt_files[key])
+                model   = MAIZEXNetModel(timm_names[key]).to(DEVICE)
+                state_dict = torch.load(pt_path, map_location=DEVICE)
+                model.load_state_dict(state_dict)
+                del state_dict
+                model.eval()
 
-            # Pick target layer per architecture
-            if key == "efficientnet_b4":
-                target = model.backbone.blocks[-1]
-            elif key == "convnext_tiny":
-                target = model.backbone.stages[-1]
-            elif key == "maxvit_small":
-                target = model.backbone.stages[-1]
-            else:   # mobilevit_small
-                target = model.backbone.stages[-1]
+                # Prepare input
+                sz  = pt_img_sizes[key]
+                tf  = get_transform(sz)
+                inp = tf(pil_img).unsqueeze(0).to(DEVICE)
 
-            handle = target.register_forward_hook(save_act)
+                # Hook-based Grad-CAM
+                def save_grad(g):
+                    gradients.append(g)
 
-            # Forward + backward
-            out  = model(inp)
-            model.zero_grad()
-            score = out[0, pred_class_idx]
-            score.backward()
+                def save_act(m, i, o):
+                    activations.append(o)
+                    o.register_hook(save_grad)
 
-            handle.remove()
+                # Pick target layer per architecture
+                if key == "efficientnet_b4":
+                    target = model.backbone.blocks[-1]
+                elif key == "convnext_tiny":
+                    target = model.backbone.stages[-1]
+                elif key == "maxvit_small":
+                    target = model.backbone.stages[-1]
+                else:   # mobilevit_small
+                    target = model.backbone.stages[-1]
 
-            if not gradients or not activations:
-                cam_maps.append(np.zeros((224, 224), dtype=np.float32))
-                continue
+                handle = target.register_forward_hook(save_act)
 
-            grads = gradients[0]    # (1, C, H, W) or similar
-            acts  = activations[0]
+                # Forward + backward — no_grad is NOT used here since we need
+                # gradients for Grad-CAM, but we keep batch size at 1 and
+                # process strictly sequentially to bound peak memory.
+                out  = model(inp)
+                model.zero_grad()
+                score = out[0, pred_class_idx]
+                score.backward()
 
-            # Pool gradients over spatial dims → weights
-            if grads.dim() == 4:
-                weights = grads.mean(dim=[2, 3], keepdim=True)
-                cam     = (weights * acts).sum(dim=1).squeeze()
-            else:
-                # Transformer outputs may be (B, N, C)
-                weights = grads.mean(dim=1)
-                cam     = (weights * acts).sum(dim=-1).squeeze()
-                n       = cam.shape[0]
-                hw      = int(n ** 0.5)
-                cam     = cam[:hw*hw].reshape(hw, hw)
+                if not gradients or not activations:
+                    cam_maps.append(np.zeros((224, 224), dtype=np.float32))
+                    continue
 
-            cam = cam.detach().cpu().numpy()
-            cam = np.maximum(cam, 0)    # ReLU
+                grads = gradients[0]    # (1, C, H, W) or similar
+                acts  = activations[0]
 
-            # Resize to 224×224
-            import cv2
-            cam = cv2.resize(cam.astype(np.float32), (224, 224))
-            if cam.max() > cam.min():
-                cam = (cam - cam.min()) / (cam.max() - cam.min())
+                # Pool gradients over spatial dims → weights
+                if grads.dim() == 4:
+                    weights = grads.mean(dim=[2, 3], keepdim=True)
+                    cam     = (weights * acts).sum(dim=1).squeeze()
+                else:
+                    # Transformer outputs may be (B, N, C)
+                    weights = grads.mean(dim=1)
+                    cam     = (weights * acts).sum(dim=-1).squeeze()
+                    n       = cam.shape[0]
+                    hw      = int(n ** 0.5)
+                    cam     = cam[:hw*hw].reshape(hw, hw)
 
-            cam_maps.append(cam)
+                cam = cam.detach().cpu().numpy()
+                cam = np.maximum(cam, 0)    # ReLU
 
-            # Free memory
-            del model
-            torch.cuda.empty_cache() if torch.cuda.is_available() else None
+                # Resize to 224×224
+                import cv2
+                cam = cv2.resize(cam.astype(np.float32), (224, 224))
+                if cam.max() > cam.min():
+                    cam = (cam - cam.min()) / (cam.max() - cam.min())
+
+                cam_maps.append(cam)
+
+            finally:
+                # Free memory aggressively — this is the critical fix.
+                # On CPU there's no CUDA cache, so gc.collect() is what
+                # actually reclaims memory between iterations. Without this,
+                # references lingering in hook closures/autograd graphs can
+                # keep all 4 models' activations alive simultaneously.
+                if handle is not None:
+                    handle.remove()
+                del model, inp, out, score, gradients, activations
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
         return cam_maps
 
     except Exception as e:
         print(f"[MAIZE-XNet] Grad-CAM failed: {e}")
+        gc.collect()
         return None
 
 
