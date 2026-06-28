@@ -1,0 +1,117 @@
+================================================================
+MAIZE-XNet Web App — Complete Deployment Guide
+================================================================
+
+STEP 1 — UPLOAD MODEL FILES TO HUGGING FACE
+--------------------------------------------
+1. Go to huggingface.co → New Model → name it "maize-xnet"
+2. Upload these files from your Kaggle Phase 6 output:
+
+   ONNX files (for inference):
+     efficientnet_b4.onnx      (~70 MB)
+     convnext_tiny.onnx        (~110 MB)
+     maxvit_small.onnx         (~262 MB)
+     mobilevit_small.onnx      (~21 MB)
+     attention_gate.onnx       (<1 MB)
+
+   PyTorch checkpoints (for Grad-CAM):
+     best_efficientnetb4_maizexnet.pth
+     best_convnexttiny_maizexnet.pth
+     best_maxvitsmall_maizexnet.pth
+     best_mobilvitsmall_maizexnet.pth
+
+STEP 2 — CONFIGURE THE APP
+---------------------------
+Open utils/model_inference.py and update line 18:
+   HF_REPO_ID = "your-username/maize-xnet"   ← replace with your HF username
+
+Open pages/05_Contact.py and update:
+   - Developer name
+   - Email address
+   - Institution name
+
+Open app.py and update footer contact details (search "your@email.com")
+
+STEP 3 — CREATE HUGGING FACE SPACE
+------------------------------------
+1. Go to huggingface.co/new-space
+2. Space name: maize-xnet
+3. SDK: Streamlit
+4. Visibility: Public (or Private)
+5. Click "Create Space"
+
+STEP 4 — UPLOAD APP FILES
+---------------------------
+Option A — Git (recommended):
+   git clone https://huggingface.co/spaces/your-username/maize-xnet
+   cp -r maize_xnet_app/* maize-xnet/
+   cd maize-xnet
+   git add .
+   git commit -m "MAIZE-XNet Phase 7 PWA deployment"
+   git push
+
+Option B — Web UI:
+   Go to your Space → Files tab → Upload files
+   Upload all files maintaining folder structure
+
+STEP 5 — VERIFY DEPLOYMENT
+----------------------------
+1. Wait for build to complete (2–5 minutes)
+2. Open the Space URL
+3. You should see the green status banner:
+   ">> LIVE_INFERENCE — MAIZE-XNet ensemble loaded"
+4. Upload a test corn leaf image
+5. Click "▶ Run MAIZE-XNet Analysis"
+6. Verify Grad-CAM, TSDS, and PDF download work
+
+TROUBLESHOOTING
+----------------
+- If status shows DEMO_MODE: models not found — check HF_REPO_ID
+- If Space crashes: check Logs tab in HF Space settings
+- If PDF fails: check reportlab is in requirements.txt (it is)
+- If Grad-CAM is blank: check .pth files are uploaded to HF
+- Slow first load: normal — models are downloaded on first request
+
+FOLDER STRUCTURE (must be exactly this in Space root)
+------------------------------------------------------
+maize-xnet/
+├── app.py
+├── requirements.txt
+├── README.md
+├── setup.sh
+├── Procfile
+├── .streamlit/
+│   └── config.toml
+├── static/
+│   ├── css/
+│   │   └── style.css
+│   └── js/
+│       └── helpers.js
+├── utils/
+│   ├── __init__.py
+│   ├── model_inference.py
+│   └── pdf_report.py
+└── pages/
+    ├── 01_About.py
+    ├── 02_Disease_Guide.py
+    ├── 03_How_It_Works.py
+    ├── 04_Performance.py
+    └── 05_Contact.py
+
+================================================================
+CUSTOMIZATION
+================================================================
+
+To update your name/contact:
+  Search for "your@email.com" and "Your Name" in all .py files
+  Replace with your real details
+
+To update performance metrics:
+  Edit pages/04_Performance.py → METRICS dict
+  Replace values with your actual Phase 2/4 test results
+
+To add sample demo images:
+  Place .jpg files in static/assets/
+  Reference them in app.py under the "About" section
+
+================================================================
